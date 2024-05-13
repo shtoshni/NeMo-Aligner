@@ -323,6 +323,16 @@ class DPOModelDataset(Dataset):
             torch.LongTensor(reject_labels), (0, max_curr_seq_len - len(reject_labels)), mode="constant", value=-100
         )
 
+        # Changes from Shenyang's fix
+        if max_curr_seq_len > self.seq_length:
+            chosen_tokens = chosen_tokens[:self.seq_length]
+            rejected_tokens = rejected_tokens[:self.seq_length]
+            labels_chosen_tokens = torch.ones_like(chosen_tokens) * (-100)
+            labels_reject_tokens = torch.ones_like(rejected_tokens) * (-100)
+            chosen_len = self.seq_length
+            reject_len = self.seq_length
+
+
         output = {
             "chosen": chosen_tokens,
             "rejected": rejected_tokens,
