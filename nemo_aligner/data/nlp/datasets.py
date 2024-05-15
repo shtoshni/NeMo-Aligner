@@ -306,9 +306,10 @@ class DPOModelDataset(Dataset):
         assert reject[0:prompt_len] == prompt, "the tokenizer for DPO has merged tokens between prompt and response"
 
         max_curr_seq_len = max(chosen_len, reject_len)
-        assert (
-            max_curr_seq_len <= self.seq_length
-        ), "tokenized text exceeds max seq len! truncate your data in preprocessing prior to DPO training"
+        # TODO(shengyangs)
+        # assert (
+        #     max_curr_seq_len <= self.seq_length
+        # ), "tokenized text exceeds max seq len! truncate your data in preprocessing prior to DPO training"
 
         chosen_tokens = torch.nn.functional.pad(
             torch.LongTensor(chosen), (0, max_curr_seq_len - chosen_len), mode="constant", value=self.eos_id
@@ -322,8 +323,8 @@ class DPOModelDataset(Dataset):
         labels_reject_tokens = torch.nn.functional.pad(
             torch.LongTensor(reject_labels), (0, max_curr_seq_len - len(reject_labels)), mode="constant", value=-100
         )
-
-        # Changes from Shenyang's fix
+        
+        # TODO(shengyangs): if the maximum length exceed the seq_length, set all labels to be zero.
         if max_curr_seq_len > self.seq_length:
             chosen_tokens = chosen_tokens[:self.seq_length]
             rejected_tokens = rejected_tokens[:self.seq_length]
@@ -331,7 +332,6 @@ class DPOModelDataset(Dataset):
             labels_reject_tokens = torch.ones_like(rejected_tokens) * (-100)
             chosen_len = self.seq_length
             reject_len = self.seq_length
-
 
         output = {
             "chosen": chosen_tokens,
