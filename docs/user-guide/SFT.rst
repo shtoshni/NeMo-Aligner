@@ -7,7 +7,7 @@ Prerequisite: Obtaining a pretrained model
 
 The NeMo framework supports efficient model alignment via the NeMo Aligner codebase.
 
-All algorithms in NeMo Aligner will work with any NeMo GPT based model. `Here <https://github.com/NVIDIA/NeMo/tree/main/scripts/nlp_language_modeling>`__ is a collection of scripts that convert popular models from HuggingFace to ``.nemo`` format.
+All algorithms in NeMo Aligner will work with any GPT based model that is from mcore(i.e in the config it has ``mcore_gpt=True``). 
 
 To start, we must first get a pretrained model to align. There are 2 models we recommend to get started. The rest of the tutorial will work with either model, but for demonstration purposes we will use the smaller 2B model. 
 
@@ -18,12 +18,12 @@ To start, we must first get a pretrained model to align. There are 2 models we r
 
         #. Get the 2B checkpoint via ``wget https://huggingface.co/nvidia/GPT-2B-001/resolve/main/GPT-2B-001_bf16_tp1.nemo``
         #. Extract the NeMo File to a folder with ``mkdir model_checkpoint && tar -xvf GPT-2B-001_bf16_tp1.nemo -C model_checkpoint``
-        #. And then run the script to convert from old NeMo checkpoint to Megatron-Core checkpoint. The script is located `here <https://github.com/NVIDIA/NeMo/blob/468d5b6d369733909524d42b80a514f33bc19263/scripts/checkpoint_converters/convert_gpt_nemo_to_mcore.py>`__.
+        #. And then run the script to convert from old NeMo checkpoint to Megatron-Core checkpoint. The script is located `here <https://github.com/NVIDIA/NeMo/blob/86b198ff93438d454f9c7f3550bcfb7d4e59feab/scripts/nlp_language_modeling/convert_nemo_gpt_to_mcore.py>`__.
             .. code-block:: bash 
 
-               python convert_gpt_nemo_to_mcore.py \
-                  --input_name_or_path ./model_checkpoint \
-                  --output_path ./mcore_gpt.nemo
+               python convert_nemo_gpt_to_mcore.py \
+                  --in-folder ./model_checkpoint \
+                  --out-file ./mcore_gpt.nemo
 
     .. tab-item:: LLaMa2 7B
         :sync: key2
@@ -32,13 +32,10 @@ To start, we must first get a pretrained model to align. There are 2 models we r
         #. Convert the LLaMa2 LLM into ``.nemo`` format
             .. code-block:: bash 
 
-               python /opt/NeMo/scripts/checkpoint_converters/convert_llama_hf_to_nemo.py \
-                   --input_name_or_path /path/to/llama --output_path /output_path/mcore_gpt.nemo
+               python NeMo/scripts/nlp_language_modeling/convert_hf_llama_to_nemo.py \
+                   --in-file /path/to/llama --out-file /output_path/mcore_gpt.nemo
 
 After these steps you should have a file ``mcore_gpt.nemo`` to use in NeMo-Aligner.
-
-.. note::
-   If you bring your own .nemo model, make sure to change the `model.encoder_seq_length` in the aligner configs to match the sequence length of your own model.
 
 .. note::
    Mcore models use Transformer engine as a backend, and it tries to find efficient kernels. But depending on the GPU you have it may not find them. If you ever face errors that relate to kernel finding set these variables on top of your script.
@@ -49,7 +46,7 @@ After these steps you should have a file ``mcore_gpt.nemo`` to use in NeMo-Align
       export NVTE_FLASH_ATTN=0
       export NVTE_FUSED_ATTN=0
 
-.. _model-aligner-sft:
+.. _sft:
 
 Model Alignment by Supervised Fine-Tuning (SFT)
 ############################################################

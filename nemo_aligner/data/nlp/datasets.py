@@ -344,6 +344,7 @@ class DPOModelDataset(Dataset):
         return output
 
 
+
 class RegressionRewardModelDataset(RewardModelDataset):
     """This class assumes each line of the dataset file is a dictionary with "text" and "label" field, 
         where "text" is a string representing the input prompt, and "label" is a list of float or int values. 

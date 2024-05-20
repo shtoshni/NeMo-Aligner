@@ -28,7 +28,6 @@ from nemo.collections.nlp.modules.common.megatron.utils import (
     get_iterator_k_split,
     get_ltor_masks_and_position_ids,
 )
-from nemo.collections.nlp.parts.mixins.nlp_adapter_mixins import NLPAdapterModelMixin
 from nemo.collections.nlp.parts.utils_funcs import get_last_rank
 from nemo_aligner.models.alignable_interface import SupervisedInterface
 from nemo_aligner.utils.distributed import broadcast_2d_tensor, from_parallel_logits_to_logprobs
@@ -39,10 +38,10 @@ from nemo_aligner.utils.train_utils import (
     prepare_for_validation_step,
     set_sync_funcs,
 )
-from nemo_aligner.utils.utils import adapter_control, cpu_weight_swap
+from nemo_aligner.utils.utils import cpu_weight_swap
 
 
-class MegatronGPTDPOModel(NLPAdapterModelMixin, MegatronGPTModel, SupervisedInterface):
+class MegatronGPTDPOModel(MegatronGPTModel, SupervisedInterface):
     """
     Megatron GPT DPO Model Training.
     """
@@ -196,7 +195,7 @@ class MegatronGPTDPOModel(NLPAdapterModelMixin, MegatronGPTModel, SupervisedInte
         )
         chosen_rewards, reject_rewards = self.split_output_tensor(self.ref_policy_kl_penalty * rewards)
 
-        loss = -torch.nn.functional.logsigmoid(chosen_rewards - reject_rewards).mean(0)
+        loss = -torch.nn.functional.logsigmoid(chosen_rewards - reject_rewards)
 
         with torch.no_grad():
             comp = chosen_rewards > reject_rewards
@@ -356,21 +355,18 @@ class MegatronGPTDPOModel(NLPAdapterModelMixin, MegatronGPTModel, SupervisedInte
 
         return logprobs
 
-    def get_ref_policy_logprobs(self, batch):
-        tokens = torch.cat((batch["chosen"], batch["rejected"]), dim=0)
-        masks = torch.cat((batch["attention_mask"], batch["attention_mask"]), dim=0)
-        pos_ids = torch.cat((batch["position_ids"], batch["position_ids"]), dim=0)
-        labels = torch.cat((batch["chosen_labels"], batch["rejected_labels"]), dim=0)
+    def get_ref_policy_logprobs(self, list_of_batches):
+        tokens = torch.cat([torch.cat((b["chosen"], b["rejected"]), dim=0) for b in list_of_batches], dim=0)
+        masks = torch.cat(
+            [torch.cat((b["attention_mask"], b["attention_mask"]), dim=0) for b in list_of_batches], dim=0
+        )
+        pos_ids = torch.cat([torch.cat((b["position_ids"], b["position_ids"]), dim=0) for b in list_of_batches], dim=0)
+        labels = torch.cat(
+            [torch.cat((b["chosen_labels"], b["rejected_labels"]), dim=0) for b in list_of_batches], dim=0
+        )
         global_batch = [tokens, masks, pos_ids, labels]
-
-        if self.use_peft and self.ref_policy_state_dict is None:
-            # when using adapters instead of full-tuning, the actor is reference model + adapters
-            with adapter_control(self):
-                # With adapters disabled (meaning using the reference model), calculate ref_log_probs
-                ref_log_probs = self.get_logprob_batch(global_batch)
-        else:
-            with cpu_weight_swap(self, self.ref_policy_state_dict, megatron_amp_O2=self.megatron_amp_O2):
-                ref_log_probs = self.get_logprob_batch(global_batch)
+        with cpu_weight_swap(self, self.ref_policy_state_dict, megatron_amp_O2=self.megatron_amp_O2):
+            ref_log_probs = self.get_logprob_batch(global_batch)
 
         # return in GPU, trainer needs to move to cpu
         return ref_log_probs
