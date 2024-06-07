@@ -59,7 +59,16 @@ class MegatronGPTDPOModel(NLPAdapterModelMixin, MegatronGPTModel, SupervisedInte
         self.ref_policy_state_dict = None
 
         self.ref_policy_kl_penalty = self.cfg.dpo.get("ref_policy_kl_penalty", 0.0)
-        self.avg_log_probs = self.cfg.dpo.get("average_log_probs", False)
+
+        self.dpo_avg_log_probs = self.cfg.dpo.get("dpo_average_log_probs", False)
+        self.sft_avg_log_probs = self.cfg.dpo.get("sft_average_log_probs", False)
+
+        self.dpo_loss_weight = self.cfg.dpo.get("dpo_loss_weight", 1)
+        self.sft_loss_weight = self.cfg.dpo.get("sft_loss_weight", 1)
+
+        assert (
+            self.dpo_loss_weight != 0 or self.sft_loss_weight != 0
+        ), "sft loss weight and dpo loss weight cannot both be 0"
 
     @torch.no_grad()
     def gather_and_split_rewards(self, pi_logprobs, ref_logprobs, labels):
@@ -68,7 +77,7 @@ class MegatronGPTDPOModel(NLPAdapterModelMixin, MegatronGPTModel, SupervisedInte
         dp_group = parallel_state.get_data_parallel_group()
 
         batch_logs = self.get_reduced_masked_logps(
-            pi_logprobs - ref_logprobs, labels[:, 1:], average_log_probs=self.avg_log_probs
+            pi_logprobs - ref_logprobs, labels[:, 1:], average_log_probs=self.dpo_avg_log_probs
         )
 
         output_list = [torch.zeros_like(batch_logs) for _ in range(dp_group.size())]
@@ -158,7 +167,7 @@ class MegatronGPTDPOModel(NLPAdapterModelMixin, MegatronGPTModel, SupervisedInte
                 )
 
                 loss, acc_chosen = self.loss_func(
-                    per_token_logps, ref_logprobs, labels[:, 1:], average_log_probs=self.avg_log_probs
+                    per_token_logps, ref_logprobs, labels[:, 1:]
                 )
 
                 reduced_loss = average_losses_across_data_parallel_group([loss])
@@ -190,13 +199,22 @@ class MegatronGPTDPOModel(NLPAdapterModelMixin, MegatronGPTModel, SupervisedInte
         else:
             return (logps * loss_mask).sum(-1)
 
-    def loss_func(self, pi_logprobs, ref_logprobs, labels, average_log_probs=False):
+    def get_sft_loss(self, pi_logprobs, labels, average_log_probs=False):
+        sft_logprobs = self.get_reduced_masked_logps(pi_logprobs, labels, average_log_probs=average_log_probs)
+        chosen_logprobs, _ = self.split_output_tensor(sft_logprobs)
+        sft_loss = -chosen_logprobs.mean(0)
+        return sft_loss
+
+    def loss_func(self, pi_logprobs, ref_logprobs, labels):
         rewards = self.get_reduced_masked_logps(
-            pi_logprobs - ref_logprobs, labels, average_log_probs=average_log_probs
+            pi_logprobs - ref_logprobs, labels, average_log_probs=self.dpo_avg_log_probs,
         )
         chosen_rewards, reject_rewards = self.split_output_tensor(self.ref_policy_kl_penalty * rewards)
 
-        loss = -torch.nn.functional.logsigmoid(chosen_rewards - reject_rewards).mean(0)
+        sft_loss = self.get_sft_loss(pi_logprobs, labels, average_log_probs=self.sft_avg_log_probs)
+        dpo_loss = -torch.nn.functional.logsigmoid(chosen_rewards - reject_rewards).mean(0)
+
+        loss = self.dpo_loss_weight * dpo_loss + self.sft_loss_weight * sft_loss
 
         with torch.no_grad():
             comp = chosen_rewards > reject_rewards
